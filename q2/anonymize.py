@@ -1,3 +1,5 @@
+import re
+
 def anonymize_names_parta(text: str):
     """
     Anonymizes names in the given text by replacing them with 'ANON'. Assume names are capitalized, and no other words are.
@@ -19,7 +21,12 @@ def anonymize_names_parta(text: str):
         str: The text with names anonymized.
     """
     # Replace all capitalized words with 'ANON' (a regular expression might be helpful; see the `re` module)
-    anonymized_text = "..."
+    replacement_str = 'ANON'
+    reg_exp = r'[A-Z][a-z-\.\']*'
+    text_to_replace = text.strip('.')
+    anonymized_text = re.sub(reg_exp, replacement_str, text_to_replace)
+    if text and text[-1] == '.':
+        anonymized_text = f'{anonymized_text}.'
     return anonymized_text
  
 def anonymize_names_partb(text: str):
@@ -36,6 +43,43 @@ def anonymize_names_partb(text: str):
     """
     # Placeholder implementation: This needs heuristics to identify names
     anonymized_text = text  # This is where the logic will go
+    general_exclusion = [
+        "a", "the", "an", "but", "also", "therefore",
+        "i", "you", "he", "she", "it", "we", "you", "they"
+    ]
+    prepositions_exclusion = [
+        "at", "by", "from", "in", "into",
+        "to", "toward", "with", "within"
+    ]
+    pronouns_exclusion = [
+        "i", "me", "you", "him", "her", "it",
+        "us", "you", "them", "my", "your",
+        "his", "her", "its", "our", "their",
+        "mine", "yours", "hers", "ours", "yours",
+        "theirs"
+    ]
+    places_exclusion = [
+        "new york city", "los angeles", "san Francisco", "chicago",
+        "tokyo", "madrid", "sydney", "rome", "berlin", "amsterdam",
+        "bangkok", "barcelona", "vienna", "prague", "dubai",
+        "dublin", "vancouver", "montreal", "paris", "london"
+    ]
+    combined_exclusion = general_exclusion + pronouns_exclusion + places_exclusion
+    if anonymized_text:
+        words = anonymized_text.strip('.').split(' ')
+        for index, word in enumerate(words):
+            word = word.lower()
+            if index == 0 and word not in general_exclusion:
+                # Heuristic 2
+                words[index] = 'ANON'
+            elif word in prepositions_exclusion or word in ["and", "or"]:
+                # Heuristic 1 and 3
+                next_word = words[index+1]
+                if next_word.lower() not in combined_exclusion:
+                    words[index+1] = 'ANON'
+        anonymized_text = ' '.join(words)
+        if text[-1] == '.':
+            anonymized_text = f'{anonymized_text}.'
     return anonymized_text
  
  

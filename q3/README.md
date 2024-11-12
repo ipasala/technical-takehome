@@ -32,9 +32,30 @@ The `senators` table consists of unique IDs, last names, party affiliations, and
 
 Write a SQL query (in your SQL dialect of choice) that lists the `request_id`s for requests made by Democrat Senators.
 
+#### Answer:
+```
+select request_id
+from requests as rt, senators as st
+where rt.senator_id = st.senator_id
+and st.party='Democrat';
+```
+
 ### Question A.(ii)
 
 Each state is represented by two Senators, but not all Senators make CDS requests. Write a SQL query that lists all states where only one of the two Senators made a request.
+
+#### Answer:
+```
+select state
+from (
+	select st.state, count(st.state) as total
+	from senators as st
+	FULL JOIN requests as rt on st.senator_id = rt.senator_id
+	where rt.request_id is null
+	group by st.state
+)
+where total=1;
+```
 
 ## Part B: Architecture Design
 
@@ -54,6 +75,42 @@ To the best of your ability, describe how you would architect such a system that
 
 We do not expect you to have a perfect or fully fleshed out solution. Feel free to describe or draw out an answer. We just want to see your thought process!
 
+#### Answer:
+Use a relational database like Postgresql where in addition to the existing tables "requests" and "senators" another table called "duplicate_requests" will store request_id (integer) and the request_id_duplicates (integer) which indicates they are duplicated like below. The table will have a unique constraint when combining both columns.
+
+| request_id |  request_id_duplicates  |
+| ---------- | ----------------------- |
+| A          | B                       |
+| B          | A                       |
+
+When staff marks B as a duplicate of A, for example A is 1 and B is 2. The table will insert (request_id, request_id_duplicates ) values (2, 1) after validating the unique contraint that the combination previously does not exist. The backend will then check if A (1) is a duplicate of any request in order to add more entires to the table but in this case there is none. It will also insert the inverse relation (request_id,  request_id_duplicates) values (1, 2) after validating the unique contraint. Like below:
+
+| request_id |   request_id_duplicates |
+| ---------- | ----------------------- |
+| 2          | 1                       |
+| 1          | 2                       |
+
+When staff marks C as a duplicate, for example C is 3. The table will insert (request_id, request_id_duplicates ) values (3, 2) after validating the unique contraint that the combination previously does not exist. The backend will then check if B (2) is a duplicate of any request. In this case, B (2) is a duplicate of A (1) so the table will insert (request_id, request_id_duplicates ) values (3, 1) after validating the unique contraint. The backend will then check if A (1) is a duplicate of any request. In this case, B (2) duplicates A (1) so the table will attempt to insert (request_id, request_id_duplicates) values (3, 2) but will be unsuccessful since it violated the unqiue constraint suggesting the chain of duplication was all checked. Lastly, it will add the inverse relation by inserting (request_id, request_id_duplicates) values (1, 3) and (2,3) after validating the unique contraint. 
+
+| request_id |  request_id_duplicates  |
+| ---------- | ----------------------- |
+| 2          | 1                       |
+| 1          | 2                       |
+| 3          | 2                       |
+| 3          | 1                       |
+| 1          | 3                       |
+| 2          | 3                       |
+
+When the user wants to retrieve duplicates requests as a csv/excel file they can use the table "duplicate_requests" by selecting request_id and grouping by request_id and aggregating on request_id_duplicates to get groups of requests that are duplicates, like below:
+
+| request_id | array_agg(request_id_duplicates)|
+| ---------- | ------------------------------- |
+| 2          | {1,3}                           |
+| 1          | {2,3}                           |
+| 3          | {2,1}                           |
+
+Another approach that could have been taken is adding the columns "is_duplicate" (boolean) and "duplicate_of_request_id" (integer) to the existing table schema "requests". When staff marks B as a duplicate of A, for the row where request is B it will update the column is_duplicate to true and duplicate_of_request_id to A. When staff marks C as a duplicate of B, for the row where request is C it will update the column is_duplicate to true and duplicate_of_request_id to B. With this approach it is a simpiler design but to find the group of duplicates will need to make multiple select calls to find the chain of duplicates using the "duplicate_of_request_id" field, each time an export needs to be done. With the preferred approach, it is a bit more work to keep track of duplicates but each time an export needs to be done it will a be lot faster as the chain of duplicates has already been calculated.
+
 ### Question B.(ii)
 
 Suppose staff want the ability to mark two CDS requests as (1) confidently distinct (i.e., **not** duplicates) or (2) potential duplicates for later discussion.
@@ -61,3 +118,15 @@ Suppose staff want the ability to mark two CDS requests as (1) confidently disti
 Describe how you would architect such a system. In your answer, describe alternatives you considered and the tradeoffs of each compared to your preferred design.
 
 We do not expect you to have a perfect or fully fleshed out solution. Feel free to describe or draw out an answer. We just want to see your thought process!
+
+#### Answer:
+Use a relational database like Postgresql where in addition to the existing tables "requests" and "senators" another table called "connected_requests" will store request_id (integer), request_id_to (integer), and connection_type (character varying) which indicates they are connected (or not) and how they are connected. The table will have a unique constraint when combining both columns request_id and request_id_to. The connection_type can store either "potential duplicates" or "confidently distinct". When staff marks request 1 and request 2 as potential duplicates, the table will insert (request_id, request_id_to, connection_type ) values (1, 2, 'potential duplicates') after validating the unique contraint that the combination previously does not exist. It will also insert the inverse relation with same connection_type (request_id, request_id_to, connection_type ) values (2, 1, 'potential duplicates') after validating the unique contraint. Like below:
+
+| request_id | request_id_to   |   connection_type    |
+| ---------- | --------------- | -------------------- |
+| 1          | 2               | potential duplicates |
+| 2          | 1               | potential duplicates |
+| 3          | 2               | confidently distinct |
+| 2          | 3               | confidently distinct |
+
+Another approach that could have been taken is adding the columns "is_potentially_connected" (boolean) and "request_id_to" (integer) to the existing table schema "requests". When staff marks request B as a potential duplicate of A, for the row where request is B it will update the column is_potentially_connected to true and request_id_to to A. The inverse will also be added for request A to be marked true as a potential duplicate of B. However, when the staff marks request B as confidently distinct from request A, for the row where request is B it will update the column is_potentially_connected to false and request_id_to to A. The inverse will also be added for request A to be marked false as a potential duplicate of B. This approach has a simple schema change of adding a boolean field to determine if there is no duplication or potential duplication. With this approach, however, is if in the future we mark 2 requests as definite duplicates then this approach will not be able to capture this information. We would need to add another boolean column as "is_duplicate" which can then get confusing with the column "is_potentially_connected". With the preferred approach, if we need to keep track of definite duplicates when can just add that relation as a new connection_type.
